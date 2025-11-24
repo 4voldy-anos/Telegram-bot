@@ -84,7 +84,13 @@ async function onStart({ bot, message, chatId, args }) {
   }
 
   const data = loadData();
-  const userId = message.from.id.toString();
+
+  // Correction ici pour récupérer userId en toute sécurité
+  let userId;
+  if (message.from && message.from.id) userId = message.from.id.toString();
+  else if (message.sender && message.sender.id) userId = message.sender.id.toString();
+  else userId = chatId.toString();
+
   if (!data[userId]) {
     data[userId] = { money: 1000000, slotsCount: 0, slotsDay: "" };
   }
