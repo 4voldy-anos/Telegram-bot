@@ -4,22 +4,23 @@ const path = require("path");
 const { createCanvas, loadImage } = require("canvas");
 const { v4: uuidv4 } = require("uuid");
 
-const API_ENDPOINT = "https://metakexbyneokex.fly.dev/images/generate";
 const CACHE_DIR = path.join(__dirname, "cache");
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 
 const nix = {
   name: "metagen",
   aliases: ["metaimg"],
-  version: "1.0.0",
-  description: "Generate a grid of 4 images from a text prompt using Meta.AI.",
+  version: "1.1.0",
+  description: "Generate a grid of 4 images from a prompt and choose one or all.",
   author: "Christus",
   prefix: false,
   category: "image",
   type: "anyone",
   cooldown: 20,
-  guide: "{p}metagen <prompt>\nExample: {p}metagen a cute cat playing with yarn",
+  guide: "{p}metagen <prompt>\nReply 1-4 to select an image or 'all' to get all images",
 };
+
+// ------------------ UTILITIES ------------------
 
 async function downloadImage(url, filePath) {
   const response = await axios.get(url, { responseType: "arraybuffer", timeout: 60000 });
@@ -50,10 +51,12 @@ async function createGridImage(imagePaths, outputPath) {
   for (let i = 0; i < images.length && i < 4; i++) {
     const { x, y } = positions[i];
     ctx.drawImage(images[i], x, y, imgWidth, imgHeight);
+
     ctx.fillStyle = "rgba(0,0,0,0.6)";
     ctx.beginPath();
     ctx.arc(x + 40, y + 40, 35, 0, Math.PI * 2);
     ctx.fill();
+
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 28px Arial";
     ctx.textAlign = "center";
@@ -65,6 +68,8 @@ async function createGridImage(imagePaths, outputPath) {
   return outputPath;
 }
 
+// ------------------ COMMAND ------------------
+
 async function onStart({ bot, message, chatId, args }) {
   const prompt = args.join(" ").trim();
   if (!prompt) return message.reply("❗ Please provide a prompt.\nUsage: {p}metagen <text>");
@@ -72,38 +77,82 @@ async function onStart({ bot, message, chatId, args }) {
   const waitMsg = await message.reply("🎨 Generating 4 images...");
 
   const tempPaths = [];
-  const outputPath = path.join(CACHE_DIR, `meta_grid_${uuidv4()}.png`);
+  let gridPath;
+  let imageUrls = [];
 
   try {
-    const res = await axios.post(API_ENDPOINT, { prompt }, { timeout: 150000 });
+    const res = await axios.post("https://metakexbyneokex.fly.dev/images/generate", { prompt }, { timeout: 150000 });
     const data = res.data;
 
-    if (!data.success || !data.images?.length) {
-      throw new Error(data.message || "API returned no images.");
-    }
+    if (!data.success || !data.images?.length) throw new Error(data.message || "No images returned.");
+    imageUrls = data.images.slice(0, 4).map(img => img.url);
 
-    const imageUrls = data.images.slice(0, 4).map(img => img.url);
     for (let i = 0; i < imageUrls.length; i++) {
       const tempFile = path.join(CACHE_DIR, `meta_${uuidv4()}.png`);
       await downloadImage(imageUrls[i], tempFile);
       tempPaths.push(tempFile);
     }
 
-    await createGridImage(tempPaths, outputPath);
+    gridPath = path.join(CACHE_DIR, `meta_grid_${uuidv4()}.png`);
+    await createGridImage(tempPaths, gridPath);
 
-    await bot.editMessageText("📤 Sending image grid...", { chat_id: chatId, message_id: waitMsg.message_id });
-    await bot.sendPhoto(chatId, outputPath, {
-      caption: `✨ Meta AI generated 4 images for prompt:\n"${prompt}"`,
+    const sentMsg = await bot.sendPhoto(chatId, gridPath, {
+      caption: `✨ Meta AI generated 4 images for prompt:\n"${prompt}"\n\nReply with 1,2,3,4 to select an image or "all" to get all images`,
+    });
+
+    // Store context for reply
+    global.GoatBot.onReply.set(sentMsg.message_id, {
+      commandName: "metagen",
+      author: chatId,
+      imageUrls,
+      tempPaths,
+      gridPath,
+      prompt,
     });
 
     await bot.deleteMessage(chatId, waitMsg.message_id);
+
   } catch (err) {
     console.error("MetaGen Command Error:", err.message);
     await bot.editMessageText(`⚠️ Error: ${err.message}`, { chat_id: chatId, message_id: waitMsg.message_id });
-  } finally {
-    // Cleanup temp files
-    [...tempPaths, outputPath].forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+    [...tempPaths, gridPath].forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
   }
 }
 
-module.exports = { nix, onStart };
+async function onReply({ bot, message, chatId, event, Reply }) {
+  if (event.senderID !== Reply.author) return;
+
+  const userReply = event.body.trim().toLowerCase();
+  const selectedPaths = [];
+
+  try {
+    if (userReply === "all") {
+      for (let i = 0; i < Reply.imageUrls.length; i++) {
+        const filePath = path.join(CACHE_DIR, `meta_selected_all_${uuidv4()}.png`);
+        await downloadImage(Reply.imageUrls[i], filePath);
+        selectedPaths.push(filePath);
+      }
+
+      await bot.sendMediaGroup(chatId, selectedPaths.map(p => ({ type: "photo", media: fs.createReadStream(p) })));
+
+    } else {
+      const sel = parseInt(userReply);
+      if (!sel || sel < 1 || sel > Reply.imageUrls.length) return;
+
+      const filePath = path.join(CACHE_DIR, `meta_selected_${uuidv4()}.png`);
+      await downloadImage(Reply.imageUrls[sel - 1], filePath);
+      selectedPaths.push(filePath);
+
+      await bot.sendPhoto(chatId, filePath, { caption: `✨ Selected image from prompt:\n"${Reply.prompt}"` });
+    }
+  } catch (err) {
+    console.error("MetaGen Reply Error:", err.message);
+    message.reply(`❌ Failed to retrieve selected image: ${err.message}`);
+  } finally {
+    // Cleanup
+    [...selectedPaths, ...Reply.tempPaths, Reply.gridPath].forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p); });
+    global.GoatBot.onReply.delete(Reply.messageID);
+  }
+}
+
+module.exports = { nix, onStart, onReply };
