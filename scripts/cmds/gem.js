@@ -25,16 +25,14 @@ function filterArtisticPrompt(prompt) {
     .replace(/\bnude\b/gi, "artistic figure study")
     .replace(/\bnaked\b/gi, "unclothed figure study")
     .replace(/\berotic\b/gi, "artistic")
-    .replace(/\bsensual\b/gi, "graceful")
-    .replace(/\bboobs?\b/gi, "chest area")
-    .replace(/\bbreasts?\b/gi, "décolletage");
+    .replace(/\bsensual\b/gi, "graceful");
 }
 
 module.exports = {
   nix: {
     name: "gem",
     aliases: ["gemi"],
-    version: "1.0.0",
+    version: "1.0.1",
     author: "Kay • fixed by Christus",
     role: 0,
     description: "Generate artistic AI images",
@@ -43,7 +41,7 @@ module.exports = {
     countDown: 5,
   },
 
-  onStart: async function ({ message, args, event }) {
+  onStart: async function ({ message, args }) {
     if (!args.length) {
       return message.reply("🎨 | Please provide an artistic prompt.");
     }
@@ -73,30 +71,27 @@ module.exports = {
       : rawPrompt;
 
     let finalPrompt = artisticMode
-      ? `You are creating a refined fine-art photograph suitable for a gallery exhibition.
+      ? `You are creating a refined fine-art photograph.
 
-ARTISTIC SUBJECT:
+SUBJECT:
 ${processedPrompt}
 
-Focus on composition, lighting, and aesthetic beauty.`
-      : `Create a high-quality image based on this description:\n${processedPrompt}`;
+Focus on composition, lighting, and aesthetics.`
+      : `Create a high-quality image:\n${processedPrompt}`;
 
     const images = [];
 
     if (ratio && ratioImages[ratio]) {
       images.push(await urlToBase64(ratioImages[ratio]));
-      finalPrompt += `
-CRITICAL RATIO RULE:
-The image must fully fill the frame with no borders or empty space.`;
     }
 
-    if (event.messageReply?.attachments?.length) {
-      const photos = event.messageReply.attachments
-        .filter(a => a.type === "photo")
-        .slice(0, 3);
-
-      for (const img of photos) {
-        const res = await axios.get(img.url, { responseType: "arraybuffer" });
+    // ✅ FIX ICI : reply image (NIX WAY)
+    const replied = message.reply_to_message;
+    if (replied?.photo) {
+      for (const img of replied.photo.slice(0, 3)) {
+        const res = await axios.get(img.file_id || img.file_unique_id, {
+          responseType: "arraybuffer",
+        });
         images.push(Buffer.from(res.data).toString("base64"));
       }
     }
@@ -105,8 +100,6 @@ The image must fully fill the frame with no borders or empty space.`;
     if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
 
     try {
-      message.reaction("⏳", event.messageID);
-
       const { data } = await axios.post(
         API_URL,
         {
@@ -114,31 +107,20 @@ The image must fully fill the frame with no borders or empty space.`;
           format: "jpg",
           ...(images.length ? { images } : {}),
         },
-        {
-          responseType: "arraybuffer",
-          timeout: 180000,
-        }
+        { responseType: "arraybuffer", timeout: 180000 }
       );
 
       const filePath = path.join(cacheDir, `gem_${Date.now()}.jpg`);
       fs.writeFileSync(filePath, data);
 
-      message.reaction("✅", event.messageID);
-
       await message.reply({
-        body: `🎨✨ Image generated${ratio ? ` (${ratio})` : ""}${artisticMode ? " [Artistic Mode]" : ""}`,
+        body: "🎨✨ Image generated successfully",
         attachment: fs.createReadStream(filePath),
       });
 
       fs.unlinkSync(filePath);
     } catch (err) {
-      console.error("GEM ERROR:", err?.response?.status || err.message);
-      message.reaction("❌", event.messageID);
-
-      if (err.response?.status === 400) {
-        return message.reply("🎨 | The request couldn't be processed. Try rephrasing artistically.");
-      }
-
+      console.error("GEM ERROR:", err.message);
       return message.reply("❌ | Image generation failed.");
     }
   }
