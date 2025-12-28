@@ -1,15 +1,15 @@
-const axios = require("axios");
+const axios = require('axios');
 
 const nix = {
   name: "ai",
-  version: "1.0.0",
-  description: "Chat with AI using the Nekolabs API.",
+  version: "2.0.0",
+  description: "Chat with Christus AI and generate media using Christus API.",
   author: "Christus",
   prefix: false,
   category: "ai",
   type: "anyone",
-  cooldown: 3,
-  guide: "{p}ai <your question>",
+  cooldown: 5,
+  guide: "{p}ai <your message>",
 };
 
 async function onStart({ bot, message, chatId, args }) {
@@ -23,17 +23,26 @@ async function onStart({ bot, message, chatId, args }) {
   const waitMsg = await message.reply("🤖 Thinking...");
 
   try {
-    const apiUrl = `https://api.nekolabs.web.id/ai/ai4chat/chat?text=${encodeURIComponent(userText)}`;
+    const apiUrl = `https://shizuai.vercel.app/chat`;
+    const response = await axios.post(apiUrl, { uid: chatId, message: userText }, { timeout: 60000 });
 
-    const response = await axios.get(apiUrl);
-
-    if (!response.data || !response.data.success) {
+    if (!response.data || !response.data.reply) {
       throw new Error("API returned an invalid response.");
     }
 
-    const aiReply = response.data.result;
+    let aiReply = response.data.reply;
 
-    // Édite le message
+    // Remplacer les mentions Shizu/Heck par Christus
+    aiReply = aiReply
+      .replace(/Heck\.ai/gi, "Christus")
+      .replace(/Aryan/gi, "Christus")
+      .replace(/🎀\s*𝗦𝗵𝗶𝘇𝘂/gi, "🗿 𝐂𝐇𝐑𝐈𝐒𝐓𝐔𝐒")
+      .replace(/Shizu AI|Shizuka AI|Shizuka|Shizu/gi, "Christus AI")
+      .replace(
+        /Je suis Shizuka AI, un assistant intelligent, poli et utile créé par Christus\./gi,
+        "Je suis Christus AI, un assistant intelligent, poli et utile créé par Christus."
+      );
+
     await bot.editMessageText(`💬 *AI Response:*\n${aiReply}`, {
       chat_id: chatId,
       message_id: waitMsg.message_id,
