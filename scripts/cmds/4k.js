@@ -9,7 +9,7 @@ if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
 const nix = {
   name: "4k",
   aliases: ["upscale", "hd", "enhance"],
-  version: "1.0.0",
+  version: "1.0.1",
   description: "Upscale an image to higher resolution (AI 4K enhancement).",
   author: "Christus",
   prefix: false,
@@ -20,9 +20,12 @@ const nix = {
 };
 
 async function onStart({ bot, message, chatId, args, event }) {
+  // Vérifie que l'image existe : soit URL, soit reply à un message contenant une photo
   const imageUrl =
     args.find(arg => arg.startsWith("http")) ||
-    event.messageReply?.attachments?.find(att => att.type === "photo")?.url;
+    (event && event.messageReply && event.messageReply.attachments
+      ? event.messageReply.attachments.find(att => att.type === "photo")?.url
+      : null);
 
   if (!imageUrl) {
     return message.reply("❌ Fournis une URL d’image **ou** réponds à une image pour l’améliorer.");
@@ -45,23 +48,13 @@ async function onStart({ bot, message, chatId, args, event }) {
     const imgStream = await axios.get(enhancedUrl, { responseType: "arraybuffer", timeout: 60000 });
     fs.writeFileSync(filePath, Buffer.from(imgStream.data));
 
-    await bot.editMessageText("📤 Envoi de l’image améliorée...", {
-      chat_id: chatId,
-      message_id: waitMsg.message_id,
-    });
-
-    await bot.sendPhoto(chatId, filePath, {
-      caption: "🖼️ Image améliorée en 4K avec succès",
-    });
-
+    await bot.editMessageText("📤 Envoi de l’image améliorée...", { chat_id: chatId, message_id: waitMsg.message_id });
+    await bot.sendPhoto(chatId, filePath, { caption: "🖼️ Image améliorée en 4K avec succès" });
     await bot.deleteMessage(chatId, waitMsg.message_id);
 
   } catch (err) {
     console.error("4K Upscale Error:", err.message);
-    await bot.editMessageText(`❌ Impossible d’améliorer l’image. ${err.message}`, {
-      chat_id: chatId,
-      message_id: waitMsg.message_id,
-    });
+    await bot.editMessageText(`❌ Impossible d’améliorer l’image. ${err.message}`, { chat_id: chatId, message_id: waitMsg.message_id });
   } finally {
     if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
   }
