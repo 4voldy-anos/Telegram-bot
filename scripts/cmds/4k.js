@@ -10,7 +10,7 @@ const CACHE_DIR = path.join(__dirname, "cache");
 
 const nix = {
   name: "4k",
-  version: "1.0",
+  version: "1.1",
   description: "Upscale une image en résolution 4K avec IA",
   author: "Christus",
   prefix: false,
@@ -20,13 +20,21 @@ const nix = {
   guide: "{p}4k <image_url> ou répondre à une image pour l'améliorer"
 };
 
-function extractImageUrl(args, message) {
+// Fonction pour récupérer l'URL de l'image depuis les args ou le reply
+function getImageUrl({ args, msg }) {
+  // 1️⃣ Vérifie si une URL est passée dans les arguments
   if (args.length) {
-    return args.find(arg => arg.startsWith("http"));
+    const url = args.find(arg => arg.startsWith("http"));
+    if (url) return url;
   }
-  if (message.reply && message.reply.attachment) {
-    return message.reply.attachment.url;
+
+  // 2️⃣ Vérifie si on répond à un message avec une photo
+  const reply = msg.reply_to_message;
+  if (reply && reply.attachments && reply.attachments.length > 0) {
+    const imageAtt = reply.attachments.find(att => att.type === "photo" || att.type === "image");
+    if (imageAtt && imageAtt.url) return imageAtt.url;
   }
+
   return null;
 }
 
@@ -35,9 +43,11 @@ async function downloadImage(url, filepath) {
   await streamPipeline(response.data, fs.createWriteStream(filepath));
 }
 
-async function onStart({ bot, message, chatId, args }) {
-  const imageUrl = extractImageUrl(args, message);
-  if (!imageUrl) return message.reply("❌ Fournis une URL d'image ou réponds à une image à améliorer.");
+async function onStart({ bot, message, chatId, args, msg }) {
+  const imageUrl = getImageUrl({ args, msg });
+
+  if (!imageUrl)
+    return message.reply("❌ Fournis une URL d'image ou réponds à une image à améliorer.");
 
   if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
