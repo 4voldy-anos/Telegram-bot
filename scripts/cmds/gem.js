@@ -36,7 +36,7 @@ module.exports = {
     aliases: ["gemi"],
     version: "1.0.0",
     author: "Kay • fixed by Christus",
-    role: 2,
+    role: 0,
     description: "Generate artistic AI images",
     category: "ai",
     prefix: false,
