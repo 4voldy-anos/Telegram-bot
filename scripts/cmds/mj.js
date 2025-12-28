@@ -20,7 +20,6 @@ const nix = {
   guide: "{p}midjourney <prompt>. Reply U1-U4 or V1-V4 to select an image."
 };
 
-// Fonction pour télécharger une image depuis une URL
 async function downloadSingleImage(url, tempDir, index) {
   let tempFilePath = '';
   try {
@@ -41,7 +40,6 @@ async function downloadSingleImage(url, tempDir, index) {
   }
 }
 
-// Lancement de la commande
 async function onStart({ bot, message, chatId, args }) {
   const prompt = args.join(" ");
   if (!prompt) return message.reply("❌ Please provide a prompt.\nUsage: {p}midjourney <prompt>");
@@ -52,12 +50,15 @@ async function onStart({ bot, message, chatId, args }) {
   const waitMsg = await message.reply("⏳ Generating 4 MidJourney images...");
 
   try {
-    // Utilisation POST pour éviter le 414
     const apiResponse = await axios.post(
       API_ENDPOINT,
       { prompt: prompt.trim(), usepolling: false },
       { timeout: 300000 }
     );
+
+    if (apiResponse.status === 404) {
+      throw new Error("API endpoint not found (404). Please check the URL.");
+    }
 
     const data = apiResponse.data;
 
@@ -84,7 +85,6 @@ async function onStart({ bot, message, chatId, args }) {
       caption: `✨ MidJourney images generated for prompt: "${prompt}". Reply U1-U4 or V1-V4 to select.`,
     });
 
-    // Setup reply tracking
     global.GoatBot.onReply.set(sentMessage.message_id, {
       commandName: nix.name,
       author: message.senderID,
@@ -94,14 +94,21 @@ async function onStart({ bot, message, chatId, args }) {
 
   } catch (err) {
     console.error("MidJourney Command Error:", err.message);
-    await bot.editMessageText(`❌ Image generation failed: ${err.message}`, {
+
+    let errorMessage = err.message;
+    if (err.response && err.response.status === 404) {
+      errorMessage = "❌ API endpoint not found (404). Please verify the URL.";
+    } else if (err.response) {
+      errorMessage = `❌ HTTP Error ${err.response.status}: ${err.response.statusText}`;
+    }
+
+    await bot.editMessageText(`❌ Image generation failed: ${errorMessage}`, {
       chat_id: chatId,
       message_id: waitMsg.message_id
     });
   }
 }
 
-// Gestion de la réponse de l'utilisateur
 async function onReply({ bot, message, chatId, event, Reply }) {
   const { imageUrls, tempPaths } = Reply;
   const cacheDir = path.join(__dirname, "cache");
