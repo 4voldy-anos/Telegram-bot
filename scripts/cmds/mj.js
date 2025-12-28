@@ -20,6 +20,7 @@ const nix = {
   guide: "{p}midjourney <prompt>. Reply U1-U4 or V1-V4 to select an image."
 };
 
+// Fonction pour télécharger une image depuis une URL
 async function downloadSingleImage(url, tempDir, index) {
   let tempFilePath = '';
   try {
@@ -40,11 +41,10 @@ async function downloadSingleImage(url, tempDir, index) {
   }
 }
 
+// Lancement de la commande
 async function onStart({ bot, message, chatId, args }) {
   const prompt = args.join(" ");
-  if (!prompt) {
-    return message.reply("❌ Please provide a prompt.\nUsage: {p}midjourney <prompt>");
-  }
+  if (!prompt) return message.reply("❌ Please provide a prompt.\nUsage: {p}midjourney <prompt>");
 
   const cacheDir = path.join(__dirname, "cache");
   if (!fs.existsSync(cacheDir)) fs.mkdirpSync(cacheDir);
@@ -52,7 +52,13 @@ async function onStart({ bot, message, chatId, args }) {
   const waitMsg = await message.reply("⏳ Generating 4 MidJourney images...");
 
   try {
-    const apiResponse = await axios.get(`${API_ENDPOINT}?prompt=${encodeURIComponent(prompt)}&usepolling=false`, { timeout: 300000 });
+    // Utilisation POST pour éviter le 414
+    const apiResponse = await axios.post(
+      API_ENDPOINT,
+      { prompt: prompt.trim(), usepolling: false },
+      { timeout: 300000 }
+    );
+
     const data = apiResponse.data;
 
     if (!data.status || data.status === "failed" || !data.results || data.results.length < 4) {
@@ -69,7 +75,10 @@ async function onStart({ bot, message, chatId, args }) {
       tempPaths.push(result.path);
     }
 
-    await bot.editMessageText("✅ Images generated. Sending...", { chat_id: chatId, message_id: waitMsg.message_id });
+    await bot.editMessageText("✅ Images generated. Sending...", {
+      chat_id: chatId,
+      message_id: waitMsg.message_id
+    });
 
     const sentMessage = await bot.sendPhoto(chatId, attachments, {
       caption: `✨ MidJourney images generated for prompt: "${prompt}". Reply U1-U4 or V1-V4 to select.`,
@@ -85,10 +94,14 @@ async function onStart({ bot, message, chatId, args }) {
 
   } catch (err) {
     console.error("MidJourney Command Error:", err.message);
-    await bot.editMessageText(`❌ Image generation failed: ${err.message}`, { chat_id: chatId, message_id: waitMsg.message_id });
+    await bot.editMessageText(`❌ Image generation failed: ${err.message}`, {
+      chat_id: chatId,
+      message_id: waitMsg.message_id
+    });
   }
 }
 
+// Gestion de la réponse de l'utilisateur
 async function onReply({ bot, message, chatId, event, Reply }) {
   const { imageUrls, tempPaths } = Reply;
   const cacheDir = path.join(__dirname, "cache");
