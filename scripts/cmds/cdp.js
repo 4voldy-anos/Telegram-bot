@@ -1,9 +1,10 @@
 const axios = require("axios");
-
+const { getStreamFromURL } = global.utils; // Assure que cette fonction existe pour récupérer les streams
 const nix = {
   name: "cdp",
+  aliases: ["coupledp"],
   version: "1.0.0",
-  description: "Get anime character images from the Christus CDP API.",
+  description: "Envoie un DP de couple aléatoire",
   author: "Christus",
   prefix: false,
   category: "image",
@@ -12,37 +13,27 @@ const nix = {
   guide: "{p}cdp",
 };
 
-async function onStart({ bot, message, chatId, args }) {
-  // Message de chargement
-  const waitMsg = await message.reply("🎨 Fetching character images...");
+async function onStart({ bot, message, chatId }) {
+  const waitMsg = await message.reply("💑 Génération du DP de couple... ⏳");
 
   try {
-    const apiUrl = "https://christus-api.vercel.app/image/CDP";
-    const res = await axios.get(apiUrl);
+    const res = await axios.get("https://xsaim8x-xxx-api.onrender.com/api/cdp2");
+    const { boy, girl } = res.data;
 
-    if (!res.data || !res.data.status || !res.data.avatar?.length) {
-      throw new Error("API returned no usable images.");
-    }
-
-    const { character, anime, avatar } = res.data;
-    const imageUrl = avatar[0]; // On prend la première image par défaut
-
-    await bot.editMessageText("📤 Sending image...", {
+    await bot.editMessageText("📤 Envoi du DP de couple...", {
       chat_id: chatId,
       message_id: waitMsg.message_id,
     });
 
-    await bot.sendPhoto(chatId, imageUrl, {
-      caption: `🖼️ *Character:* ${character}\n📺 *Anime:* ${anime}`,
-      parse_mode: "Markdown",
+    await bot.sendPhoto(chatId, [await getStreamFromURL(boy), await getStreamFromURL(girl)], {
+      caption: "💑 Voici ton DP de couple ! 😘✨",
     });
 
     await bot.deleteMessage(chatId, waitMsg.message_id);
 
   } catch (err) {
     console.error("CDP Command Error:", err.message);
-
-    await bot.editMessageText(`⚠️ Error: ${err.message}`, {
+    await bot.editMessageText("❌ Impossible de récupérer le DP de couple.", {
       chat_id: chatId,
       message_id: waitMsg.message_id,
     });
