@@ -1,95 +1,111 @@
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 
-const nix = {
-  name: "xnx",
-  aliases: ["xnxx", "pornsearch"],
-  version: "1.0",
-  author: "Christus",
-  description: "Search and send adult videos from XNX API",
-  prefix: false,
-  category: "nsfw",
-  type: "anyone",
-  cooldown: 5,
-  guide: "{p}xnx <keyword>"
-};
+const API_CONFIG_URL = "https://raw.githubusercontent.com/aryannix/stuffs/master/raw/apis.json";
 
-const API_CONFIG = "https://raw.githubusercontent.com/aryannix/stuffs/master/raw/apis.json";
+async function getAPIBase() {
+  const { data } = await axios.get(API_CONFIG_URL);
+  if (!data?.api) throw new Error("Missing api field");
+  return data.api;
+}
 
-async function getStream(url) {
+async function streamFromURL(url) {
   const res = await axios({ url, responseType: "stream" });
   return res.data;
 }
 
-async function onStart({ bot, message, chatId, args }) {
-  if (!args.length) return message.reply("⚠️ Please provide a keyword.");
+async function downloadVideo(videoUrl, apiBase, message) {
+  const { data } = await axios.get(`${apiBase}/xnxdl?url=${encodeURIComponent(videoUrl)}`);
+  const fileUrl = data?.result?.files?.high || data?.result?.files?.low;
+  if (!fileUrl) throw new Error("No file");
 
-  const waitMsg = await message.reply("⏳ Searching videos...");
+  const filePath = path.join(__dirname, `xnx_${Date.now()}.mp4`);
+  const writer = fs.createWriteStream(filePath);
 
-  try {
-    const { data: configData } = await axios.get(API_CONFIG);
-    const base = configData?.api;
-    if (!base) throw new Error("Failed to fetch API config.");
+  const res = await axios({ url: fileUrl, responseType: "stream" });
+  res.data.pipe(writer);
 
+  await new Promise((resolve, reject) => {
+    writer.on("finish", resolve);
+    writer.on("error", reject);
+  });
+
+  await message.reply({ attachment: fs.createReadStream(filePath) });
+  fs.unlinkSync(filePath);
+}
+
+module.exports = {
+  nix: {
+    name: "xnx",
+    aliases: ["xnxdl"],
+    version: "1.0",
+    author: "Christus",
+    description: "Search and download XNX videos",
+    category: "media",
+    prefix: false,
+    role: 0,
+    countDown: 5,
+  },
+
+  onStart: async function ({ bot, message, args, chatId, msg }) {
     const query = args.join(" ");
-    const res = await axios.get(`${base}/xnx?q=${encodeURIComponent(query)}`);
-    const results = res.data.result;
+    if (!query) return message.reply("❌ Please provide a search keyword.");
 
-    if (!results || results.length === 0) {
-      await bot.editMessageText("❌ No results found.", { chat_id: chatId, message_id: waitMsg.message_id });
-      return;
+    let apiBase;
+    try {
+      apiBase = await getAPIBase();
+    } catch (err) {
+      return message.reply("❌ Failed to fetch API configuration.");
     }
 
-    const limitedResults = results.slice(0, 6);
-    let msg = "";
-    for (let i = 0; i < limitedResults.length; i++) {
-      const v = limitedResults[i];
-      msg += `${i + 1}. ${v.title}\n⏱ ${v.duration || "N/A"} | 👀 ${v.views || "N/A"}\n\n`;
+    try {
+      const res = await axios.get(`${apiBase}/xnx?q=${encodeURIComponent(query)}`);
+      const results = res.data.result?.slice(0, 6);
+      if (!results || results.length === 0) return message.reply("❌ No results found.");
+
+      const thumbs = await Promise.all(
+        results.filter(r => r.thumbnail).map(r => streamFromURL(r.thumbnail))
+      );
+
+      const body = results
+        .map((v, i) => `• ${i + 1}. ${v.title}\n⏱ ${v.duration || "N/A"} | 👀 ${v.views || "N/A"}`)
+        .join("\n\n") + "\n\nReply with a number (1–6) to download.";
+
+      const sentMsg = await bot.sendMessage({ body, attachment: thumbs }, chatId);
+
+      global.GoatBot.onReply.set(sentMsg.message_id, {
+        commandName: "xnx",
+        messageID: sentMsg.message_id,
+        author: msg.senderID,
+        results,
+        apiBase,
+      });
+
+    } catch (err) {
+      console.error(err);
+      return message.reply("❌ Failed to search.");
+    }
+  },
+
+  onReply: async function ({ bot, event, Reply }) {
+    if (event.senderID !== Reply.author) return;
+
+    const choice = parseInt(event.body);
+    if (isNaN(choice) || choice < 1 || choice > Reply.results.length) {
+      return bot.sendMessage("❌ Invalid selection.", event.threadID);
     }
 
-    await bot.editMessageText(msg + "Reply with number (1-6) to download video", { chat_id: chatId, message_id: waitMsg.message_id });
+    const selected = Reply.results[choice - 1];
+    await bot.unsendMessage(Reply.messageID);
 
-    global.GoatBot.onReply.set(waitMsg.message_id, {
-      results: limitedResults,
-      author: message.senderID,
-      messageID: waitMsg.message_id,
-      base
-    });
-
-  } catch (err) {
-    console.error("XNX Search Error:", err.message || err);
-    await bot.editMessageText("❌ Failed to search videos.", { chat_id: chatId, message_id: waitMsg.message_id });
+    try {
+      await downloadVideo(selected.link, Reply.apiBase, {
+        reply: (msg) => bot.sendMessage(msg, event.threadID)
+      });
+    } catch (err) {
+      console.error(err);
+      bot.sendMessage("❌ Failed to download video.", event.threadID);
+    }
   }
-}
-
-async function onReply({ bot, event, Reply }) {
-  const { results, author, messageID, base, chatId } = Reply;
-  if (event.senderID !== author) return;
-
-  const choice = parseInt(event.body);
-  if (isNaN(choice) || choice < 1 || choice > results.length) {
-    return bot.sendMessage(chatId, "❌ Invalid selection.", event.messageID);
-  }
-
-  const selected = results[choice - 1];
-  await bot.unsendMessage(messageID);
-  const waitMsg = await bot.sendMessage(chatId, "⏳ Downloading video...");
-
-  try {
-    const dlRes = await axios.get(`${base}/xnxdl?url=${encodeURIComponent(selected.link)}`);
-    const data = dlRes.data.result;
-    const videoUrl = data.files.high || data.files.low;
-    if (!videoUrl) throw new Error("No video URL returned");
-
-    await bot.sendVideo(chatId, videoUrl, {
-      caption: `• Title: ${data.title}\n• Duration: ${data.duration || "N/A"}\n• Views: ${data.info || "N/A"}`
-    });
-
-    await bot.unsendMessage(waitMsg.message_id);
-
-  } catch (err) {
-    console.error("XNX Download Error:", err.message || err);
-    await bot.editMessageText("❌ Failed to download video.", { chat_id: chatId, message_id: waitMsg.message_id });
-  }
-}
-
-module.exports = { nix, onStart, onReply };
+};
