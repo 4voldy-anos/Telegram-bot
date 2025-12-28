@@ -1,28 +1,32 @@
+const fs = require("fs");
+const path = require("path");
 const axios = require("axios");
+
+const CACHE_DIR = path.join(__dirname, "tmp");
+if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
 const nix = {
   name: "nude",
+  aliases: ["nudepic"],
   version: "1.0",
-  author: "Christus",
-  description: "Envoie une image NSFW aléatoire (Nude).",
+  author: "Christus Dev AI | Redwan API",
+  description: "Fetch a random image from Nude API",
   prefix: false,
-  category: "nsfw",
+  category: "AI",
   type: "anyone",
   cooldown: 5,
   guide: "{p}nude"
 };
 
 async function onStart({ bot, message, chatId }) {
-  const waitMsg = await message.reply("⏳ Génération de l'image...");
+  const waitMsg = await message.reply("⏳ Fetching image, please wait...");
 
   try {
-    const { data } = await axios.get("https://christus-api.vercel.app/nsfw/Nude");
+    const { data } = await axios.get("https://christus-api.vercel.app/nsfw/Nude", { timeout: 60000 });
 
-    if (!data.status || !data.imageUrl) {
-      throw new Error("L'API n'a pas renvoyé d'image.");
-    }
+    if (!data?.status || !data?.imageUrl) throw new Error("API did not return an image.");
 
-    await bot.editMessageText(`✅ Image NSFW générée par ${data.creator}`, {
+    await bot.editMessageText(`✅ Image fetched successfully!\nPowered by: ${data.creator}`, {
       chat_id: chatId,
       message_id: waitMsg.message_id
     });
@@ -30,8 +34,8 @@ async function onStart({ bot, message, chatId }) {
     await bot.sendPhoto(chatId, data.imageUrl);
 
   } catch (err) {
-    console.error("NSFW Nude CMD Error:", err.message);
-    await bot.editMessageText(`❌ Impossible de récupérer l'image : ${err.message}`, {
+    console.error("Nude Command Error:", err.message || err);
+    await bot.editMessageText(`❌ Failed to fetch image: ${err.message || err}`, {
       chat_id: chatId,
       message_id: waitMsg.message_id
     });
